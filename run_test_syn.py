@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import imp
 import os
 import sys
 
@@ -105,3 +104,4 @@ if __name__ == "__main__":
     print("Number of parameter: %.2fM" % (total/1e6))
     setup_seed(seed=0)
     compute_score(net, "./pretrained_networks/RBSR_synthetic.pth.tar")
+    compute_score(net, "./checkpoints/dbsr/RBSR_synthetic/RBSR_ep0400.pth.tar")

@@ -27,7 +27,7 @@ import torch
 
 def run(settings):
     settings.description = 'Default settings for training DBSR models on synthetic burst dataset '
-    settings.batch_size = 16
+    settings.batch_size = 8     # originally 16
     settings.num_workers = 2
     settings.multi_gpu = True
     settings.print_interval = 1

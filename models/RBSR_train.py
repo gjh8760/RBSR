@@ -106,8 +106,8 @@ class RBSR(nn.Module):
         ref_feat = feats_[:, :1, :, :, :].repeat(1, t-1, 1, 1, 1).view(-1, *feats_.shape[-3:])
         oth_feat = feats_[:, 1:, :, :, :].contiguous().view(-1, *feats_.shape[-3:])
 
-        flows_backward = self.compute_flow(lqs)
-        flows_backward = flows_backward.view(-1, 2, *feats_.shape[-2:])
+        flows_backward = self.compute_flow(lqs)     # (n, t-1, 2, h, w)
+        flows_backward = flows_backward.view(-1, 2, *feats_.shape[-2:])     # (n(t-1), 2, h, w)
 
         oth_feat_warped = flow_warp(oth_feat, flows_backward.permute(0, 2, 3, 1))
         oth_feat = self.dcn_alignment(oth_feat, ref_feat, oth_feat_warped, flows_backward)
