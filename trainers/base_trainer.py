@@ -27,6 +27,8 @@ class BaseTrainer:
         self.update_settings(settings)
 
         self.epoch = 0
+        self.best_epoch = 0
+        self.best_psnr = 0
         self.stats = {}
 
         self.device = getattr(settings, 'device', None)
@@ -91,6 +93,7 @@ class BaseTrainer:
 
     def save_checkpoint(self):
         """Saves a checkpoint of the network and other variables."""
+        """Also remains a best checkpoint."""
 
         net = self.actor.net.module if multigpu.is_multi_gpu(self.actor.net) else self.actor.net
 
@@ -120,6 +123,15 @@ class BaseTrainer:
 
         # Now rename to actual checkpoint. os.rename seems to be atomic if files are on same filesystem. Not 100% sure
         os.rename(tmp_file_path, file_path)
+
+        # Save best checkpoint.
+        psnr = self.stats['train']['Stat/psnr'].history[-1]
+        if psnr > self.best_psnr:
+            self.best_epoch = self.epoch
+            tmp_file_path = '{}/{}_best_ep{:04d}.tmp'.format(directory, net_type, self.epoch)
+            torch.save(state, tmp_file_path)
+            file_path = '{}/{}_best_ep{:04d}.pth.tar'.format(directory, net_type, self.epoch)
+            os.rename(tmp_file_path, file_path)
 
     def load_checkpoint(self, checkpoint = None, fields = None, ignore_fields = None, load_constructor = False):
         """Loads a network checkpoint file.
