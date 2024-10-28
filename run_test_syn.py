@@ -105,3 +105,4 @@ if __name__ == "__main__":
     setup_seed(seed=0)
     compute_score(net, "./pretrained_networks/RBSR_synthetic.pth.tar")
     compute_score(net, "./checkpoints/dbsr/RBSR_synthetic/RBSR_ep0400.pth.tar")
+    compute_score(net, "./checkpoints/dbsr/RBSR_synthetic/RBSR_best_ep0391.pth.tar")

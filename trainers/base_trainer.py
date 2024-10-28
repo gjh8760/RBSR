@@ -127,7 +127,12 @@ class BaseTrainer:
         # Save best checkpoint.
         psnr = self.stats['train']['Stat/psnr'].history[-1]
         if psnr > self.best_psnr:
+            if self.best_epoch != 0:
+                os.remove('{}/{}_best_ep{:04d}.pth.tar'.format(directory, net_type, self.best_epoch))
             self.best_epoch = self.epoch
+            self.best_psnr = psnr
+            state['best_epoch'] = self.best_epoch
+            state['best_psnr'] = self.best_psnr
             tmp_file_path = '{}/{}_best_ep{:04d}.tmp'.format(directory, net_type, self.epoch)
             torch.save(state, tmp_file_path)
             file_path = '{}/{}_best_ep{:04d}.pth.tar'.format(directory, net_type, self.epoch)
