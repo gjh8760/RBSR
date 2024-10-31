@@ -32,6 +32,10 @@ import cv2
 import numpy as np
 import tqdm
 import random
+import imageio
+
+from data.postprocessing_functions import SimplePostProcess
+
 def setup_seed(seed=0):
 	torch.manual_seed(seed)
 	torch.cuda.manual_seed(seed)
@@ -89,6 +93,20 @@ def compute_score(model, model_path=""):
         for m, m_fn in metrics_all.items():
             metric_value = m_fn(net_pred, gt.unsqueeze(0)).cpu().item()
             scores[m].append(metric_value) 
+        
+        postprocess = SimplePostProcess(return_np=True)
+        net_pred_srgb = postprocess.process(net_pred.squeeze(0).cpu(), meta_info)
+        gt_srgb = postprocess.process(gt.cpu(), meta_info)
+
+        directory = 'results/{}/{}'.format(os.path.basename(model_path), idx)
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        
+        pred_srgb_path = '{}/{}_pred.png'.format(directory, burst_name)
+        gt_path = '{}/{}_gt.png'.format(directory, burst_name)
+        imageio.imwrite(pred_srgb_path, net_pred_srgb)
+        imageio.imwrite(gt_path, gt_srgb)
+
     psnr_mean = np.mean(scores['psnr'])
     ssim_mean = np.mean(scores['ssim'])
     lpips_mean = np.mean(scores['lpips'])
@@ -104,5 +122,5 @@ if __name__ == "__main__":
     print("Number of parameter: %.2fM" % (total/1e6))
     setup_seed(seed=0)
     compute_score(net, "./pretrained_networks/RBSR_synthetic.pth.tar")
-    compute_score(net, "./checkpoints/dbsr/RBSR_synthetic/RBSR_ep0400.pth.tar")
-    compute_score(net, "./checkpoints/dbsr/RBSR_synthetic/RBSR_best_ep0391.pth.tar")
+    # compute_score(net, "./checkpoints/dbsr/RBSR_synthetic/RBSR_ep0400.pth.tar")
+    # compute_score(net, "./checkpoints/dbsr/RBSR_synthetic/RBSR_best_ep0391.pth.tar")

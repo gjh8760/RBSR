@@ -4,6 +4,11 @@ import torch
 import traceback
 from admin import loading, multigpu
 
+from dataset.synthetic_burst_val_set import SyntheticBurstVal
+from models.loss.image_quality_v2 import PSNR, SSIM, LPIPS
+import tqdm
+import numpy as np
+
 
 class BaseTrainer:
     """Base trainer class. Contains functions for training and saving/loading chackpoints.
@@ -125,18 +130,75 @@ class BaseTrainer:
         os.rename(tmp_file_path, file_path)
 
         # Save best checkpoint.
-        psnr = self.stats['train']['Stat/psnr'].history[-1]
-        if psnr > self.best_psnr:
+        # psnr = self.stats['train']['Stat/psnr'].history[-1]
+        # if psnr > self.best_psnr:
+        #     if self.best_epoch != 0:
+        #         os.remove('{}/{}_best_ep{:04d}.pth.tar'.format(directory, net_type, self.best_epoch))
+        #     self.best_epoch = self.epoch
+        #     self.best_psnr = psnr
+        #     state['best_epoch'] = self.best_epoch
+        #     state['best_psnr'] = self.best_psnr
+        #     tmp_file_path = '{}/{}_best_ep{:04d}.tmp'.format(directory, net_type, self.epoch)
+        #     torch.save(state, tmp_file_path)
+        #     file_path = '{}/{}_best_ep{:04d}.pth.tar'.format(directory, net_type, self.epoch)
+        #     os.rename(tmp_file_path, file_path)
+
+        # Save best checkpoint.
+        dataset = SyntheticBurstVal()
+        metrics = ('psnr',)
+        boundary_ignore = 40
+        metrics_all = {}
+        scores = {}
+        for m in metrics:
+            if m == 'psnr':
+                loss_fn = PSNR(boundary_ignore=boundary_ignore)
+            elif m == 'ssim':
+                loss_fn = SSIM(boundary_ignore=boundary_ignore, use_for_loss=False)
+            elif m == 'lpips':
+                loss_fn = LPIPS(boundary_ignore=boundary_ignore)
+                loss_fn.to('cuda')
+            else:
+                raise Exception
+            metrics_all[m] = loss_fn
+            scores[m] = []
+        
+        scores_all = {}
+        scores = {k: [] for k, v in scores.items()}
+        for idx in tqdm.tqdm(range(len(dataset))):
+            burst, gt, meta_info = dataset[idx]
+            burst_name = meta_info['burst_name']
+
+            burst = burst.to('cuda').unsqueeze(0)
+            gt = gt.to('cuda')
+
+            with torch.no_grad():
+                burst = burst[:, :14, ...]
+                net_pred, _ = net(burst)
+                net_pred = net_pred[0]
+            
+            # Perform quantization to be consistent with evaluating on saved images
+            net_pred_int = (net_pred.clamp(0.0, 1.0) * 2 ** 14).short()
+            net_pred = net_pred_int.float() / (2 ** 14)
+
+            for m, m_fn in metrics_all.items():
+                metric_value = m_fn(net_pred, gt.unsqueeze(0)).cpu().item()
+                scores[m].append(metric_value)
+        psnr_mean = np.mean(scores['psnr'])
+
+        if psnr_mean > self.best_psnr:
+            print(f'PSNR: {psnr_mean}(best)')
             if self.best_epoch != 0:
                 os.remove('{}/{}_best_ep{:04d}.pth.tar'.format(directory, net_type, self.best_epoch))
             self.best_epoch = self.epoch
-            self.best_psnr = psnr
+            self.best_psnr = psnr_mean
             state['best_epoch'] = self.best_epoch
             state['best_psnr'] = self.best_psnr
             tmp_file_path = '{}/{}_best_ep{:04d}.tmp'.format(directory, net_type, self.epoch)
             torch.save(state, tmp_file_path)
             file_path = '{}/{}_best_ep{:04d}.pth.tar'.format(directory, net_type, self.epoch)
             os.rename(tmp_file_path, file_path)
+        else:
+            print(f'PSNR: {psnr_mean}')
 
     def load_checkpoint(self, checkpoint = None, fields = None, ignore_fields = None, load_constructor = False):
         """Loads a network checkpoint file.

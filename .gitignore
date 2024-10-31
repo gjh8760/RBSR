@@ -3,3 +3,4 @@ checkpoints
 pretrained_networks
 .vscode
 tensorboard
+results
