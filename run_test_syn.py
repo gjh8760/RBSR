@@ -117,10 +117,10 @@ def compute_score(model, model_path=""):
 
 if __name__ == "__main__":
     from models.RBSR_test import RBSR
-    net = RBSR()
+    
+    net = RBSR(align_type='flow_alignment')
     total = sum([param.nelement() for param in net.parameters()])
     print("Number of parameter: %.2fM" % (total/1e6))
     setup_seed(seed=0)
-    compute_score(net, "./pretrained_networks/RBSR_synthetic.pth.tar")
-    # compute_score(net, "./checkpoints/dbsr/RBSR_synthetic/RBSR_ep0400.pth.tar")
-    # compute_score(net, "./checkpoints/dbsr/RBSR_synthetic/RBSR_best_ep0391.pth.tar")
+    # compute_score(net, "./pretrained_networks/RBSR_best_ep0400.pth.tar")
+    compute_score(net, "./pretrained_networks/RBSR_best_ep0381_flow_alignment.pth.tar")

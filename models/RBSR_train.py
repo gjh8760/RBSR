@@ -18,14 +18,28 @@ class RBSR(nn.Module):
                  max_residue_magnitude=10,
                  is_low_res_input=True,
                  spynet_pretrained=None,
-                 cpu_cache_length=100):
+                 cpu_cache_length=100,
+                 align_type=None):
 
         super().__init__()
+
+        self.align_type = align_type if align_type is not None else 'flow_guided_dcn_alignment'
+
         self.mid_channels = mid_channels
-        # optical flow
-        self.spynet = SPyNet(pretrained='./pretrained_networks/spynet_20210409-c6c1bd09.pth')
-        self.dcn_alignment = DeformableAlignment(mid_channels,mid_channels,3,padding=1,deform_groups=8,
-                max_residue_magnitude=max_residue_magnitude)
+
+        if self.align_type == 'flow_guided_dcn_alignment':
+            # optical flow
+            self.spynet = SPyNet(pretrained='./pretrained_networks/spynet_20210409-c6c1bd09.pth')
+            self.dcn_alignment = DeformableAlignment(mid_channels,mid_channels,3,padding=1,deform_groups=8,
+                    max_residue_magnitude=max_residue_magnitude)
+        elif self.align_type == 'flow_alignment':
+            self.spynet = SPyNet(pretrained='./pretrained_networks/spynet_20210409-c6c1bd09.pth')
+        elif self.align_type == 'dcn_alignment':
+            self.dcn_alignment_without_flow = DeformableAlignmentWithoutFlow(mid_channels, mid_channels, 3, padding=1,
+                    max_residue_magnitude=max_residue_magnitude)
+        else:
+            raise Exception
+
         # feature extraction module
         self.feat_extract = ResidualBlocksWithInputConv(4, mid_channels, 5)
 
@@ -98,25 +112,64 @@ class RBSR(nn.Module):
         return torch.stack(outputs, dim=1)
     def forward(self, lqs):
 
-        n, t, c, h, w = lqs.size() #(n, t, c, h,w)
-        feats = {}
-        feats_ = self.feat_extract(lqs.view(-1, c, h, w))   # (*, C, H, W)
-        h, w = feats_.shape[2:]
-        feats_ = feats_.view(n, t, -1, h, w)
-        ref_feat = feats_[:, :1, :, :, :].repeat(1, t-1, 1, 1, 1).view(-1, *feats_.shape[-3:])
-        oth_feat = feats_[:, 1:, :, :, :].contiguous().view(-1, *feats_.shape[-3:])
+        if self.align_type == 'flow_alignment':
+            n, t, c, h, w = lqs.size() #(n, t, c, h,w)    
+            feats = {}
+            feats_ = self.feat_extract(lqs.view(-1, c, h, w))   # (*, C, H, W)
+            feats_ = feats_.view(n, t, -1, h, w)
+            
+            oth_feat = feats_[:, 1:, :, :, :].contiguous().view(-1, *feats_.shape[-3:])
 
-        flows_backward = self.compute_flow(lqs)     # (n, t-1, 2, h, w)
-        flows_backward = flows_backward.view(-1, 2, *feats_.shape[-2:])     # (n(t-1), 2, h, w)
+            flows_backward = self.compute_flow(lqs) # (n, t-1, 2, h, w)
+            flows_backward = flows_backward.view(-1, 2, *feats_.shape[-2:]) # (n(t-1), 2, h, w)
 
-        oth_feat_warped = flow_warp(oth_feat, flows_backward.permute(0, 2, 3, 1))
-        oth_feat = self.dcn_alignment(oth_feat, ref_feat, oth_feat_warped, flows_backward)
-        oth_feat = oth_feat.view(n, t-1, -1, h, w)
-        ref_feat = ref_feat.view(n, t-1, -1, h, w)[:, :1, :, :, :]
-        feats_ = torch.cat((ref_feat, oth_feat), dim=1)  
+            oth_feat_warped = flow_warp(oth_feat, flows_backward.permute(0, 2, 3, 1))   # (n(t-1), c, h, w)
+            
+            oth_feat = oth_feat_warped.view(n, t-1, -1, h, w)
+            ref_feat = feats_[:, :1, :, :, :]
+            feats_ = torch.cat((ref_feat, oth_feat), dim=1)
 
-        feats['spatial'] = [feats_[:, i, :, :, :] for i in range(0, t, 1)]
-        base_feat = feats_[:, 0, :, :, :]
+            feats['spatial'] = [feats_[:, i, :, :, :] for i in range(0, t, 1)]
+            base_feat = feats_[:, 0, :, :, :]
+
+        elif self.align_type == 'dcn_alignment':
+            n, t, c, h, w = lqs.size() #(n, t, c, h,w)
+            feats = {}
+            feats_ = self.feat_extract(lqs.view(-1, c, h, w))   # (*, C, H, W)
+            h, w = feats_.shape[2:]
+            feats_ = feats_.view(n, t, -1, h, w)
+            ref_feat = feats_[:, :1, :, :, :].repeat(1, t-1, 1, 1, 1).view(-1, *feats_.shape[-3:])
+            oth_feat = feats_[:, 1:, :, :, :].contiguous().view(-1, *feats_.shape[-3:])
+
+            oth_feat = self.dcn_alignment_without_flow(oth_feat, ref_feat)
+            oth_feat = oth_feat.view(n, t-1, -1, h, w)
+            ref_feat = ref_feat.view(n, t-1, -1, h, w)[:, :1, :, :, :]
+            feats_ = torch.cat((ref_feat, oth_feat), dim=1)  
+            
+            feats['spatial'] = [feats_[:, i, :, :, :] for i in range(0, t, 1)]
+            base_feat = feats_[:, 0, :, :, :]
+            
+
+        elif self.align_type == 'flow_guided_dcn_alignment':
+            n, t, c, h, w = lqs.size() #(n, t, c, h,w)
+            feats = {}
+            feats_ = self.feat_extract(lqs.view(-1, c, h, w))   # (*, C, H, W)
+            h, w = feats_.shape[2:]
+            feats_ = feats_.view(n, t, -1, h, w)
+            ref_feat = feats_[:, :1, :, :, :].repeat(1, t-1, 1, 1, 1).view(-1, *feats_.shape[-3:])
+            oth_feat = feats_[:, 1:, :, :, :].contiguous().view(-1, *feats_.shape[-3:])
+
+            flows_backward = self.compute_flow(lqs)     # (n, t-1, 2, h, w)
+            flows_backward = flows_backward.view(-1, 2, *feats_.shape[-2:])     # (n(t-1), 2, h, w)
+
+            oth_feat_warped = flow_warp(oth_feat, flows_backward.permute(0, 2, 3, 1))
+            oth_feat = self.dcn_alignment(oth_feat, ref_feat, oth_feat_warped, flows_backward)
+            oth_feat = oth_feat.view(n, t-1, -1, h, w)
+            ref_feat = ref_feat.view(n, t-1, -1, h, w)[:, :1, :, :, :]
+            feats_ = torch.cat((ref_feat, oth_feat), dim=1)  
+
+            feats['spatial'] = [feats_[:, i, :, :, :] for i in range(0, t, 1)]
+            base_feat = feats_[:, 0, :, :, :]
 
         # feature propagation
         module = 'backward_1'
@@ -223,6 +276,53 @@ class DeformableAlignment(ModulatedDeformConv2d):
                                        self.stride, self.padding,
                                        self.dilation, self.groups,
                                        self.deform_groups)
+
+
+class DeformableAlignmentWithoutFlow(ModulatedDeformConv2d):
+    """deformable alignment module.
+
+    Args:
+        in_channels (int): Same as nn.Conv2d.
+        out_channels (int): Same as nn.Conv2d.
+        kernel_size (int or tuple[int]): Same as nn.Conv2d.
+        stride (int or tuple[int]): Same as nn.Conv2d.
+        padding (int or tuple[int]): Same as nn.Conv2d.
+        dilation (int or tuple[int]): Same as nn.Conv2d.
+        groups (int): Same as nn.Conv2d.
+        bias (bool or str): If specified as `auto`, it will be decided by the
+            norm_cfg. Bias will be set as True if norm_cfg is None, otherwise
+            False.
+        max_residue_magnitude (int): The maximum magnitude of the offset
+            residue (Eq. 6 in paper). Default: 10.
+    """
+    # 128 64 3 1 1 1 1 [0.,0.,..,0.] 10 
+    def __init__(self, *args, **kwargs):
+        self.max_residue_magnitude = kwargs.pop('max_residue_magnitude', 10)
+        super(DeformableAlignmentWithoutFlow, self).__init__(*args, **kwargs)
+        self.conv_offset = nn.Sequential(
+            nn.Conv2d(2 * self.out_channels, self.out_channels, 3, 1, 1),
+            nn.LeakyReLU(negative_slope=0.1, inplace=True),
+            nn.Conv2d(self.out_channels, self.out_channels, 3, 1, 1),
+            nn.LeakyReLU(negative_slope=0.1, inplace=True),
+            nn.Conv2d(self.out_channels, self.out_channels, 3, 1, 1),
+            nn.LeakyReLU(negative_slope=0.1, inplace=True),
+            nn.Conv2d(self.out_channels, 27 * self.deform_groups, 3, 1, 1),
+        )
+        self.init_offset()
+    def init_offset(self):
+        constant_init(self.conv_offset[-1], val=0, bias=0)
+
+    def forward(self, cur_feat, ref_feat):
+        extra_feat = torch.cat([cur_feat, ref_feat], dim=1)
+        out = self.conv_offset(extra_feat)
+        o1, o2, mask = torch.chunk(out, 3, dim=1)
+        offset = self.max_residue_magnitude * torch.tanh(torch.cat((o1, o2), dim=1))
+        mask = torch.sigmoid(mask)
+        return modulated_deform_conv2d(cur_feat, offset, mask, self.weight, self.bias,
+                                       self.stride, self.padding,
+                                       self.dilation, self.groups,
+                                       self.deform_groups)
+
 
 class SPyNet(nn.Module):
     """SPyNet network structure.

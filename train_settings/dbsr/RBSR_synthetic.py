@@ -71,7 +71,7 @@ def run(settings):
                               stack_dim=0, batch_size=settings.batch_size)
     loader_val = DataLoader('val', dataset_val, training=False, num_workers=settings.num_workers,
                             stack_dim=0, batch_size=settings.batch_size, epoch_interval=5)
-    net = RBSR()
+    net = RBSR(align_type=settings.align_type)
 
     # Wrap the network for multi GPU training
     if settings.multi_gpu:
