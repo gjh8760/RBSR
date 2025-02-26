@@ -173,8 +173,11 @@ class BaseTrainer:
 
             with torch.no_grad():
                 burst = burst[:, :14, ...]
-                net_pred, _ = net(burst)
-                net_pred = net_pred[0]
+                net_pred = net(burst)
+                if isinstance(net_pred, list):
+                    net_pred = net_pred[0]
+                else:
+                    net_pred = net_pred[:, 0]
             
             # Perform quantization to be consistent with evaluating on saved images
             net_pred_int = (net_pred.clamp(0.0, 1.0) * 2 ** 14).short()

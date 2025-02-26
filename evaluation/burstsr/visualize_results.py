@@ -21,7 +21,7 @@ if env_path not in sys.path:
 
 from dataset.burstsr_dataset import get_burstsr_val_set, CanonImage
 
-from utils.opencv_plotting import BurstSRVis
+from utils_rbsr.opencv_plotting import BurstSRVis
 import torch
 import cv2
 import numpy as np

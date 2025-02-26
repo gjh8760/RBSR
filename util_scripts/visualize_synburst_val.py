@@ -11,7 +11,7 @@ import data.raw_image_processing as raw_processing
 import argparse
 from dataset.synthetic_burst_val_set import SyntheticBurstVal
 from data.postprocessing_functions import SimplePostProcess
-from utils.opencv_plotting import BurstSRVis
+from utils_rbsr.opencv_plotting import BurstSRVis
 
 
 def visualize_synburst_val(mode='srgb'):

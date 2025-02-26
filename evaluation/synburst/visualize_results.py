@@ -19,7 +19,7 @@ env_path = os.path.join(os.path.dirname(__file__), '../..')
 if env_path not in sys.path:
     sys.path.append(env_path)
 
-from utils.opencv_plotting import BurstSRVis
+from utils_rbsr.opencv_plotting import BurstSRVis
 import torch
 from models.loss.image_quality_v2 import PSNR
 import cv2

@@ -15,6 +15,9 @@
 
 import os
 import sys
+import dataset as datasets
+from data import processing, sampler, DataLoader
+
 
 env_path = os.path.join(os.path.dirname(__file__), '../..')
 if env_path not in sys.path:
@@ -35,6 +38,8 @@ import random
 import imageio
 
 from data.postprocessing_functions import SimplePostProcess
+from data.image_loader import opencv_loader
+import data.transforms as tfm
 
 def setup_seed(seed=0):
 	torch.manual_seed(seed)
@@ -55,7 +60,32 @@ def compute_score(model, model_path=""):
         net.load_state_dict(checkpoint_dict['net'])
     net = net.to(device).train(False)
     
-    dataset = SyntheticBurstVal()
+    # 삼성 데이터셋 load
+    samsung = datasets.Samsung()
+    transform = tfm.Transform(tfm.ToTensor())
+
+    data_processing = processing.SyntheticBurstProcessing(crop_sz=(384, 384),
+                                                          burst_size=14,
+                                                          downsample_factor=4,
+                                                          burst_transformation_params={
+                                                              'max_translation': 24.0,
+                                                              'max_rotation': 1.0,
+                                                              'max_shear': 0.0,
+                                                              'max_scale': 0.0,
+                                                              'border_crop': 24},
+                                                              transform=transform,
+                                                          image_processing_params={
+                                                              'random_ccm': True,
+                                                              'random_gains': True,
+                                                              'smoothstep': True,
+                                                              'gamma': True,
+                                                              'add_noise': True},
+                                                          random_crop=False)
+    dataset = sampler.RandomImage([samsung], [1], 
+                                  samples_per_epoch=20, processing=data_processing)
+    loader = DataLoader('val', dataset, training=False, num_workers=2,
+                        stack_dim=0, batch_size=1)
+
     metrics = ('psnr', 'ssim', 'lpips')
     boundary_ignore = 40
     metrics_all = {}
@@ -75,11 +105,18 @@ def compute_score(model, model_path=""):
 
     scores_all = {}
     scores = {k: [] for k, v in scores.items()}
-    for idx in tqdm.tqdm(range(len(dataset))):
-        burst, gt, meta_info = dataset[idx]
-        burst_name = meta_info['burst_name']
+    for idx, data in enumerate(loader):
+        print(f'{idx}')
+        burst = data['burst']
+        gt = data['frame_gt']
+        meta_info = data['meta_info']
 
-        burst = burst.to(device).unsqueeze(0)
+        meta_info['cam2rgb'] =  meta_info['cam2rgb'].squeeze(0)
+
+
+        burst_name = '0'
+
+        burst = burst.to(device)
         gt = gt.to(device)
 
         with torch.no_grad():
@@ -91,14 +128,15 @@ def compute_score(model, model_path=""):
         net_pred = net_pred_int.float() / (2 ** 14)
 
         for m, m_fn in metrics_all.items():
-            metric_value = m_fn(net_pred, gt.unsqueeze(0)).cpu().item()
+            metric_value = m_fn(net_pred, gt).cpu().item()
             scores[m].append(metric_value) 
+            print(f'{m}: {metric_value}')
         
         postprocess = SimplePostProcess(return_np=True)
         net_pred_srgb = postprocess.process(net_pred.squeeze(0).cpu(), meta_info)
-        gt_srgb = postprocess.process(gt.cpu(), meta_info)
+        gt_srgb = postprocess.process(gt.squeeze(0).cpu(), meta_info)
 
-        directory = 'results/{}/{}'.format(os.path.basename(model_path), idx)
+        directory = 'results/{}/{}/{}'.format(os.path.basename(model_path), 'samsung', idx)
         if not os.path.exists(directory):
             os.makedirs(directory)
         
@@ -116,12 +154,14 @@ def compute_score(model, model_path=""):
 
 
 if __name__ == "__main__":
-    from models.RBSR_test import RBSR
-    
-    net = RBSR()
-    # net = RBSR(align_type='None')
+    # from models.RBSR_test import RBSR
+    from models.RBSR_test import RBSR_DINO
+    # net = RBSR()
+    # net = RBSR(align_type='flow_alignment')
+    net = RBSR_DINO()
     total = sum([param.nelement() for param in net.parameters()])
     print("Number of parameter: %.2fM" % (total/1e6))
     setup_seed(seed=0)
-    # compute_score(net, "./pretrained_networks/RBSR_best_ep0400.pth.tar")
-    compute_score(net, "./pretrained_networks/RBSR_best_ep0399_debug.pth.tar")
+    compute_score(net, "./pretrained_networks/RBSR_DINO_best_ep0390.pth.tar")
+    # compute_score(net, "./pretrained_networks/RBSR_best_ep0381_flow_alignment.pth.tar")
+    # compute_score(net, "./pretrained_networks/RBSR_best_ep0399_debug.pth.tar")

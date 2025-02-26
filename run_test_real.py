@@ -58,7 +58,7 @@ def setup_seed(seed=0):
 	torch.backends.cudnn.benchmark = True
 
 def compute_score_BIPnet(model, model_path, num_frame):
-    from utils.metrics import AlignedPSNR, AlignedLPIPS, AlignedSSIM
+    from utils_rbsr.metrics import AlignedPSNR, AlignedLPIPS, AlignedSSIM
     device = 'cuda'             
     checkpoint_dict = torch.load(model_path, map_location='cpu')
     model.load_state_dict(checkpoint_dict['net'])

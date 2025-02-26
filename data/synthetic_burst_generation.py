@@ -17,7 +17,7 @@ import random
 import cv2
 import numpy as np
 import data.camera_pipeline as rgb2raw
-from utils.data_format_utils import torch_to_numpy, numpy_to_torch
+from utils_rbsr.data_format_utils import torch_to_numpy, numpy_to_torch
 
 
 def rgb2rawburst(image, burst_size, downsample_factor=1, burst_transformation_params=None,

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import os
-from utils.loading import load_network
+from utils_rbsr.loading import load_network
 from admin.environment import env_settings
 
 

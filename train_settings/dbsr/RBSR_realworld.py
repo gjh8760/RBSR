@@ -19,7 +19,7 @@ from data import processing, sampler, DataLoader
 from trainers import SimpleTrainer
 from admin.multigpu import MultiGPU
 from models.loss.image_quality_v2 import PSNR, PixelWiseError
-from utils.loading import load_network
+from utils_rbsr.loading import load_network
 from models.alignment.pwcnet import PWCNet
 from admin.environment import env_settings
 from models.RBSR_train import RBSR

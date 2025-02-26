@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import utils.data_format_utils as df_utils
+import utils_rbsr.data_format_utils as df_utils
 from data.camera_pipeline import apply_gains, apply_ccm, apply_smoothstep, gamma_compression
 
 

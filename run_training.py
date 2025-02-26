@@ -61,12 +61,12 @@ def main():
     parser.add_argument('train_module', type=str, help='Name of module in the "train_settings/" folder.')
     parser.add_argument('train_name', type=str, help='Name of the train settings file.')
     parser.add_argument('exp_name', type=str, help='Name of this experiment.')
-    parser.add_argument('align_type', type=str, default='flow_guided_dcn_alignment', help='Feature alignment type.')
+    # parser.add_argument('align_type', type=str, default='flow_guided_dcn_alignment', help='Feature alignment type.')
     parser.add_argument('--cudnn_benchmark', type=bool, default=True, help='Set cudnn benchmark on (1) or off (0) (default is on).')
 
     args = parser.parse_args()
 
-    run_training(args.train_module, args.train_name, args.exp_name, args.align_type, args.cudnn_benchmark)
+    run_training(args.train_module, args.train_name, args.exp_name, args.cudnn_benchmark)
 
 
 if __name__ == '__main__':

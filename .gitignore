@@ -4,3 +4,5 @@ pretrained_networks
 .vscode
 tensorboard
 results
+image
+feature

@@ -6,6 +6,7 @@ from mmcv.ops import ModulatedDeformConv2d, modulated_deform_conv2d
 from mmcv.runner import load_checkpoint
 from mmcv.cnn import ConvModule
 from models.common import PixelShufflePack, flow_warp, make_layer, ResidualBlockNoBN
+from models.dino import DINOFeatureExtractor
 from utils_basicvsr.logger import get_root_logger
 import random
 
@@ -192,6 +193,141 @@ class RBSR(nn.Module):
         elif pretrained is not None:
             raise TypeError(f'"pretrained" must be a str or None. '
                             f'But received {type(pretrained)}.')
+
+
+class RBSR_DINO(nn.Module):
+    """RBSR network structure.
+    """
+    def __init__(self,
+                 mid_channels=64,
+                 dino_channels=256,
+                 ):
+
+        super().__init__()
+
+        self.mid_channels = mid_channels
+        self.dino_channels = dino_channels
+
+        # optical flow
+        self.spynet = SPyNet(pretrained='./pretrained_networks/spynet_20210409-c6c1bd09.pth')
+
+        # feature extraction module
+        self.feat_extract = ResidualBlocksWithInputConv(4, mid_channels, 5)
+
+        # propagation branches
+        self.backbone = nn.ModuleDict()
+        self.backbone['backward_1'] = ResidualBlocksWithInputConv(4 * mid_channels, mid_channels, 40)
+
+        # DINO feature extractor
+        self.dino_feat_extract = DINOFeatureExtractor()
+        for param in self.dino_feat_extract.parameters():
+            param.requires_grad = False
+        self.conv_shallow = nn.Conv2d(dino_channels, mid_channels, 1, 1)
+        self.conv_mid = nn.Conv2d(dino_channels * 2, mid_channels, 1, 1)
+        self.conv_deep = nn.Conv2d(dino_channels * 4, mid_channels, 1, 1)
+        self.conv_dino = nn.Conv2d(mid_channels * 3, mid_channels, 1, 1)
+
+        # upsampling module
+        self.reconstruction = ResidualBlocksWithInputConv(
+            2* mid_channels, mid_channels, 5)
+        self.upsample1 = PixelShufflePack(
+            mid_channels, mid_channels, 2, upsample_kernel=3)
+        self.upsample2 = PixelShufflePack(
+            mid_channels, mid_channels, 2, upsample_kernel=3)
+        self.upsample3 = PixelShufflePack(
+            mid_channels, mid_channels, 2, upsample_kernel=3)
+        self.conv_hr = nn.Conv2d(mid_channels, mid_channels, 3, 1, 1)
+        self.conv_last = nn.Conv2d(mid_channels, 3, 3, 1, 1)
+        # activation function
+        self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
+
+        self.skipup1 = PixelShufflePack(4, mid_channels, 2, upsample_kernel=3)
+        self.skipup2 = PixelShufflePack(mid_channels, mid_channels, 2, upsample_kernel=3)
+        self.skipup3 = PixelShufflePack(mid_channels, mid_channels, 2, upsample_kernel=3)
+
+    def compute_flow(self, lqs):
+        lqs = torch.stack((lqs[:, :, 0], lqs[:, :, 1:3].mean(dim=2), lqs[:, :, 3]), dim=2)
+        n, t, c, h, w = lqs.size()
+        oth = lqs[:, 1:, :, :, :].reshape(-1, c, h, w)
+        ref = lqs[:,:1, :, :, :].repeat(1,t-1,1,1,1).reshape(-1, c, h, w)
+        flows_backward = self.spynet(ref, oth).view(n, t - 1, 2, h, w)
+        return flows_backward
+    
+    def upsample(self, lq, feat, base_feat):
+        skip1 = self.skipup1(lq)
+        skip2 = self.skipup2(skip1)
+        skip3 = self.skipup3(skip2)
+        hr = torch.cat([base_feat, feat], dim=1)
+        hr = self.reconstruction(hr) 
+        hr = self.lrelu(self.upsample1(hr)) + skip1
+        hr = self.lrelu(self.upsample2(hr)) + skip2
+        hr = self.lrelu(self.upsample3(hr)) + skip3
+        hr = self.lrelu(self.conv_hr(hr))
+        hr = self.conv_last(hr)
+        return hr
+
+    def get_dino_feat(self, img):
+        dino_feats = self.dino_feat_extract(img)
+        feat_shallow = self.conv_shallow(F.interpolate(dino_feats[0], scale_factor=0.5, mode='nearest'))
+        feat_mid = self.conv_mid(dino_feats[1])
+        feat_deep = self.conv_deep(F.interpolate(dino_feats[2], scale_factor=2, mode='nearest'))
+        feat_fused = torch.cat([feat_shallow, feat_mid, feat_deep], dim=1)
+        feat_fused = self.lrelu(self.conv_dino(feat_fused))
+        return feat_fused
+
+    def forward(self, lqs, random_idx=None):
+        n, t, c, h, w = lqs.size() #(n, t, c, h,w)
+        feats = {}
+        feats_ = self.feat_extract(lqs.view(-1, c, h, w))   # (*, C, H, W)
+        h, w = feats_.shape[2:]
+        feats_ = feats_.view(n, t, -1, h, w)
+        ref_feat = feats_[:, :1, :, :, :].repeat(1, t-1, 1, 1, 1).view(-1, *feats_.shape[-3:])
+        oth_feat = feats_[:, 1:, :, :, :].contiguous().view(-1, *feats_.shape[-3:])
+
+        flows_backward = self.compute_flow(lqs)     # (n, t-1, 2, h, w)
+        flows_backward = flows_backward.view(-1, 2, *feats_.shape[-2:])     # (n(t-1), 2, h, w)
+        oth_feat_warped = flow_warp(oth_feat, flows_backward.permute(0, 2, 3, 1))
+
+        oth_feat = oth_feat_warped.view(n, t-1, -1, h, w)
+        ref_feat = ref_feat.view(n, t-1, -1, h, w)[:, :1, :, :, :]
+        feats_ = torch.cat((ref_feat, oth_feat), dim=1)  
+
+        feats['spatial'] = [feats_[:, i, :, :, :] for i in range(0, t, 1)]  # t * (n, c, h, w)
+        base_feat = feats_[:, 0, :, :, :]   # (n, c, h, w)
+
+        # feature propagation
+        if random_idx is not None:
+            res_list = []
+            feat_prop = torch.zeros_like(feats['spatial'][0])
+            feat_dino_prev = torch.zeros_like(feat_prop)
+            for i in range(0, len(feats['spatial'])):
+                feat_current = feats['spatial'][i]
+                feat = [base_feat] + [feat_current] + [feat_prop] + [feat_dino_prev]
+                feat = torch.cat(feat, dim=1)
+                feat_prop = feat_prop + self.backbone['backward_1'](feat)
+                res = self.upsample(lqs[:, 0, :, :, :], feat_prop, base_feat)
+                if random_idx == i:
+                    res_list.append(res)
+                if i != len(feats['spatial']) - 1:
+                    feat_dino_prev = self.get_dino_feat(res)
+            res_list.insert(0, res)
+            return torch.stack(res_list, dim=1)
+        
+        else:
+            res_list = []
+            feat_prop = torch.zeros_like(feats['spatial'][0])
+            feat_dino_prev = torch.zeros_like(feat_prop)
+            for i in range(0, len(feats['spatial'])):
+                feat_current = feats['spatial'][i]
+                feat = [base_feat] + [feat_current] + [feat_prop] + [feat_dino_prev]
+                feat = torch.cat(feat, dim=1)
+                feat_prop = feat_prop + self.backbone['backward_1'](feat)
+                res = self.upsample(lqs[:, 0, :, :, :], feat_prop, base_feat)
+                if i != len(feats['spatial']) - 1:
+                    feat_dino_prev = self.get_dino_feat(res)
+            res_list.append(res)
+            return torch.stack(res_list, dim=1)
+
 
 class ResidualBlocksWithInputConv(nn.Module):
     """Residual blocks with a convolution in front.
